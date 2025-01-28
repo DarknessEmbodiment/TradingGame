@@ -1,0 +1,15 @@
+{
+  "files": {
+    "main.css": "/TradingGame/static/css/main.dbd0e4a7.css",
+    "main.js": "/TradingGame/static/js/main.32fb0cdc.js",
+    "static/js/453.1fe90ec5.chunk.js": "/TradingGame/static/js/453.1fe90ec5.chunk.js",
+    "index.html": "/TradingGame/index.html",
+    "main.dbd0e4a7.css.map": "/TradingGame/static/css/main.dbd0e4a7.css.map",
+    "main.32fb0cdc.js.map": "/TradingGame/static/js/main.32fb0cdc.js.map",
+    "453.1fe90ec5.chunk.js.map": "/TradingGame/static/js/453.1fe90ec5.chunk.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.dbd0e4a7.css",
+    "static/js/main.32fb0cdc.js"
+  ]
+}

@@ -16,7 +16,12 @@ const App: React.FC = () => {
   const [series, setSeries] = useState<Candle[]>([]);
   const [currentStep, setCurrentStep] = useState(0);
   const [balance, setBalance] = useState(1000);
-  const [position, setPosition] = useState<{ type: 'long' | 'short'; entryPrice: number; liquidationPrice: number; quantity: number } | null>(null);
+  const [position, setPosition] = useState<{ 
+    type: 'long' | 'short'; 
+    entryPrice: number; 
+    liquidationPrice: number; 
+    quantity: number 
+  } | null>(null);
   const [leverage, setLeverage] = useState(10);
   const [symbol, setSymbol] = useState('BTCUSDT');
 
@@ -25,8 +30,10 @@ const App: React.FC = () => {
     const randomInterval = INTERVALS[Math.floor(Math.random() * INTERVALS.length)];
     setSymbol(randomSymbol);
     
-    const endTime = Date.now();
+    // Random end time between 30 days and 365 days ago
+    const endTime = Date.now() - Math.floor(Math.random() * (31536000000 - 2592000000) + 2592000000);
     const limit = 100;
+    
     const response = await axios.get(
       `https://api.binance.com/api/v3/klines?symbol=${randomSymbol}&interval=${randomInterval}&limit=${limit}&endTime=${endTime}`
     );
@@ -37,7 +44,9 @@ const App: React.FC = () => {
     }));
 
     setSeries(data);
-    setCurrentStep(Math.floor(data.length * 0.8)); // Start at 80% of historical data
+    setCurrentStep(Math.floor(data.length * 0.8));
+    setPosition(null); // Reset position when new data loads
+    setBalance(1000); // Reset balance for new simulation
   };
 
   const executeTrade = (type: 'long' | 'short') => {
@@ -71,6 +80,7 @@ const App: React.FC = () => {
 
     const newStep = currentStep + 1;
     const currentCandle = series[newStep];
+    const prevCandle = series[currentStep];
 
     if (position) {
       if (checkLiquidation(currentCandle)) {
@@ -79,10 +89,14 @@ const App: React.FC = () => {
       } else {
         const exitPrice = currentCandle.y[3];
         const pnl = position.type === 'long'
-          ? (exitPrice - position.entryPrice) * position.quantity
-          : (position.entryPrice - exitPrice) * position.quantity;
+          ? (exitPrice - prevCandle.y[3]) * position.quantity
+          : (prevCandle.y[3] - exitPrice) * position.quantity;
         
-        setBalance(b => Math.max(0, b + pnl));
+        // Update balance correctly using previous state
+        setBalance(b => {
+          const newBalance = b + pnl;
+          return newBalance >= 0 ? newBalance : 0;
+        });
       }
     }
     

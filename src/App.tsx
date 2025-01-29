@@ -11,10 +11,11 @@ type Candle = {
 
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'XRPUSDT'];
 const INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1d'];
+const WINDOW_SIZE = 100;
 
 const App: React.FC = () => {
   const [series, setSeries] = useState<Candle[]>([]);
-  const [currentStep, setCurrentStep] = useState(0);
+  const [buffer, setBuffer] = useState<Candle[]>([]);
   const [balance, setBalance] = useState(1000);
   const [position, setPosition] = useState<{ 
     type: 'long' | 'short'; 
@@ -23,19 +24,31 @@ const App: React.FC = () => {
     quantity: number 
   } | null>(null);
   const [leverage, setLeverage] = useState(10);
-  const [symbol, setSymbol] = useState('BTCUSDT');
+  const [currentSymbol, setCurrentSymbol] = useState('BTCUSDT');
+  const [currentInterval, setCurrentInterval] = useState('1m');
+  const [nextStartTime, setNextStartTime] = useState(0);
+
+  const intervalToMs = (interval: string) => {
+    const num = parseInt(interval.slice(0, -1));
+    const unit = interval.slice(-1);
+    switch(unit) {
+      case 'm': return num * 60 * 1000;
+      case 'h': return num * 60 * 60 * 1000;
+      case 'd': return num * 24 * 60 * 60 * 1000;
+      default: throw new Error('Invalid interval');
+    }
+  };
 
   const fetchRandomData = async () => {
     const randomSymbol = SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)];
     const randomInterval = INTERVALS[Math.floor(Math.random() * INTERVALS.length)];
-    setSymbol(randomSymbol);
+    setCurrentSymbol(randomSymbol);
+    setCurrentInterval(randomInterval);
     
-    // Random end time between 30 days and 365 days ago
-    const endTime = Date.now() - Math.floor(Math.random() * (31536000000 - 2592000000) + 2592000000);
-    const limit = 100;
+    const startTime = Date.now() - Math.floor(Math.random() * (31536000000 - 2592000000) + 2592000000);
     
     const response = await axios.get(
-      `https://api.binance.com/api/v3/klines?symbol=${randomSymbol}&interval=${randomInterval}&limit=${limit}&endTime=${endTime}`
+      `https://api.binance.com/api/v3/klines?symbol=${randomSymbol}&interval=${randomInterval}&limit=${WINDOW_SIZE}&startTime=${startTime}`
     );
 
     const data: Candle[] = response.data.map((kline: any[]) => ({
@@ -44,13 +57,15 @@ const App: React.FC = () => {
     }));
 
     setSeries(data);
-    setCurrentStep(Math.floor(data.length * 0.8));
-    setPosition(null); // Reset position when new data loads
-    setBalance(1000); // Reset balance for new simulation
+    setBuffer([]);
+    
+    const intervalMs = intervalToMs(randomInterval);
+    const lastCandleTime = data[data.length -1].x.getTime();
+    setNextStartTime(lastCandleTime + intervalMs);
   };
 
   const executeTrade = (type: 'long' | 'short') => {
-    const currentPrice = series[currentStep]?.y[3];
+    const currentPrice = series[series.length -1]?.y[3];
     if (!currentPrice) return;
 
     const quantity = (balance * leverage) / currentPrice;
@@ -75,12 +90,35 @@ const App: React.FC = () => {
       : high >= position.liquidationPrice;
   };
 
-  const moveStep = () => {
-    if (currentStep >= series.length - 1) return;
+  const moveStep = async () => {
+    if (buffer.length === 0) {
+      try {
+        const response = await axios.get(
+          `https://api.binance.com/api/v3/klines?symbol=${currentSymbol}&interval=${currentInterval}&limit=${WINDOW_SIZE}&startTime=${nextStartTime}`
+        );
+        const newBuffer: Candle[] = response.data.map((kline: any[]) => ({
+          x: new Date(kline[0]),
+          y: [parseFloat(kline[1]), parseFloat(kline[2]), parseFloat(kline[3]), parseFloat(kline[4])],
+        }));
+        if (newBuffer.length === 0) return;
+        
+        setBuffer(newBuffer);
+        const intervalMs = intervalToMs(currentInterval);
+        const lastCandleTime = newBuffer[newBuffer.length -1].x.getTime();
+        setNextStartTime(lastCandleTime + intervalMs);
+      } catch (error) {
+        console.error('Error fetching buffer:', error);
+        return;
+      }
+    }
 
-    const newStep = currentStep + 1;
-    const currentCandle = series[newStep];
-    const prevCandle = series[currentStep];
+    if (buffer.length === 0) return;
+
+    const newSeries = [...series.slice(1), buffer[0]];
+    const newBuffer = buffer.slice(1);
+
+    const currentCandle = newSeries[newSeries.length -1];
+    const prevCandle = series[series.length -1];
 
     if (position) {
       if (checkLiquidation(currentCandle)) {
@@ -91,29 +129,26 @@ const App: React.FC = () => {
         const pnl = position.type === 'long'
           ? (exitPrice - prevCandle.y[3]) * position.quantity
           : (prevCandle.y[3] - exitPrice) * position.quantity;
-        
-        // Update balance correctly using previous state
-        setBalance(b => {
-          const newBalance = b + pnl;
-          return newBalance >= 0 ? newBalance : 0;
-        });
+        setBalance(b => Math.max(0, b + pnl));
       }
     }
-    
-    setCurrentStep(newStep);
+
+    setSeries(newSeries);
+    setBuffer(newBuffer);
   };
 
-  const chartData = series.slice(0, currentStep + 1);
-  const currentPrice = chartData[chartData.length - 1]?.y[3];
+  const closePosition = () => {
+    setPosition(null);
+  };
+
+  const currentPrice = series[series.length -1]?.y[3];
 
   return (
     <div className="App">
-      <h1>Trading Simulator ({symbol})</h1>
+      <h1>Trading Simulator ({currentSymbol})</h1>
       <div className="controls">
-        <button onClick={fetchRandomData}>Random</button>
-        <button onClick={moveStep} disabled={currentStep >= series.length - 1}>
-          Next Step
-        </button>
+        <button onClick={() => fetchRandomData()}>Random</button>
+        <button onClick={moveStep}>Next Step</button>
         <input
           type="number"
           value={leverage}
@@ -138,11 +173,19 @@ const App: React.FC = () => {
 
       <Chart
         options={{
-          chart: { type: 'candlestick' },
+          chart: { type: 'candlestick',
+            animations: {
+              dynamicAnimation: {
+                // Makes bars move like a snake
+                // but makes the horizontal transition bad
+                enabled: false,
+              }
+            }
+           },
           xaxis: { type: 'datetime' },
-          title: { text: 'Historical Candles' }
+          title: { text: 'Historical Candles' },
         }}
-        series={[{ data: chartData }]}
+        series={[{ data: series }]}
         type="candlestick"
         height={400}
       />
@@ -150,6 +193,9 @@ const App: React.FC = () => {
       <div className="trade-buttons">
         <button onClick={() => executeTrade('long')}>Buy Long</button>
         <button onClick={() => executeTrade('short')}>Sell Short</button>
+        <button onClick={closePosition} disabled={!position}>
+          Close Position
+        </button>
       </div>
     </div>
   );
